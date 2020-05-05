@@ -12,6 +12,7 @@ from tqdm import tqdm
 import lpips
 from model import Generator
 
+import visdom
 
 def noise_regularize(noises):
     loss = 0
@@ -72,6 +73,16 @@ def make_image(tensor):
     )
 
 
+def norm_ip(img, min, max):
+    img.clamp_(min=min, max=max)
+    img.add_(-min).div_(max - min + 1e-5)
+def norm_range(t, range_2):
+    if range_2 is not None:
+        norm_ip(t, range_2[0], range_2[1])
+    else:
+        norm_ip(t, float(t.min()), float(t.max()))
+
+
 if __name__ == '__main__':
     device = 'cuda'
 
@@ -88,6 +99,8 @@ if __name__ == '__main__':
     parser.add_argument('--mse', type=float, default=0)
     parser.add_argument('--w_plus', action='store_true')
     parser.add_argument('files', metavar='FILES', nargs='+')
+    parser.add_argument('--display', type=int, default=0)
+    
 
     args = parser.parse_args()
 
@@ -145,6 +158,9 @@ if __name__ == '__main__':
     pbar = tqdm(range(args.step))
     latent_path = []
 
+    #if args.display != 0:
+    vis = visdom.Visdom(port='1235')
+
     for i in pbar:
         t = i / args.step
         lr = get_lr(t, args.lr)
@@ -178,6 +194,7 @@ if __name__ == '__main__':
 
         if (i + 1) % 100 == 0:
             latent_path.append(latent_in.detach().clone())
+            
 
         pbar.set_description(
             (
@@ -185,6 +202,20 @@ if __name__ == '__main__':
                 f' mse: {mse_loss.item():.4f}; lr: {lr:.4f}'
             )
         )
+        if args.display != 0 and i % args.display == 0 :
+            img_dis, _ = g_ema([latent_in], input_is_latent=True, noise=noises)
+            range_2=(-1, 1)
+            norm_range(img_dis[0], range_2)
+            norm_range(img_gen[0], range_2)
+            norm_range(img_dis[1], range_2)
+            norm_range(img_gen[1], range_2)
+
+
+            vis.image(img_dis[0])
+            vis.image(img_gen[0])
+            vis.image(img_dis[1])
+            vis.image(img_gen[1]
+
 
     result_file = {'noises': noises}
 
@@ -197,7 +228,7 @@ if __name__ == '__main__':
     for i, input_name in enumerate(args.files):
         result_file[input_name] = {'img': img_gen[i], 'latent': latent_in[i]}
         img_name = os.path.splitext(os.path.basename(input_name))[0] + '-project.png'
-        pil_img = Image.fromarray(img_ar[i])
+        pil_img = Image.fromarray(img_ar[i])    
         pil_img.save(img_name)
 
     torch.save(result_file, filename)
